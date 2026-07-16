@@ -2,8 +2,16 @@ name: Build and Release APK
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
