@@ -4,7 +4,7 @@ import 'utils/storage.dart';
 import 'utils/theme.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
-import 'screens/file_manager_screen.dart';
+import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
@@ -61,9 +61,9 @@ class _AuthChecker extends StatelessWidget {
     final baseUrl = StorageService.baseUrl;
 
     if (token != null && baseUrl != null && token.isNotEmpty && baseUrl.isNotEmpty) {
-      final api = CloudreveApi(baseUrl, token: token);
+      final api = CloudreveApi(baseUrl, accessToken: token);
       api.refreshToken = StorageService.refreshToken;
-      return FileManagerScreen(api: api);
+      return HomeScreen(api: api);
     }
 
     return const LoginScreen();

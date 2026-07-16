@@ -1,57 +1,65 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/file_item.dart';
 import '../models/user.dart';
 
 class CloudreveApi {
-  final String baseUrl;
-  String? token;
+  String baseUrl;
+  String? accessToken;
   String? refreshToken;
 
-  CloudreveApi(this.baseUrl, {this.token});
+  CloudreveApi(this.baseUrl, {this.accessToken});
 
-  String get _base => baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  String get _base {
+    var url = baseUrl;
+    if (url.endsWith('/')) url = url.substring(0, url.length - 1);
+    if (!url.endsWith('/api/v4')) {
+      url = '$url/api/v4';
+    }
+    return url;
+  }
 
   Map<String, String> get _headers {
     final h = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
-    if (token != null && token!.isNotEmpty) {
-      h['Authorization'] = 'Bearer $token';
+    if (accessToken != null && accessToken!.isNotEmpty) {
+      h['Authorization'] = 'Bearer $accessToken';
     }
     return h;
   }
 
-  Future<Map<String, dynamic>> _handleResponse(http.Response res) async {
-    final body = jsonDecode(res.body);
-    if (body is! Map<String, dynamic>) {
-      throw Exception('Invalid response format');
+  Map<String, dynamic> _parseResponse(http.Response res) {
+    final body = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = body is Map<String, dynamic> ? body : <String, dynamic>{};
+    final code = data['code'];
+    if (code != null && code != 0 && code != 203) {
+      throw Exception(data['msg'] ?? data['message'] ?? 'Request failed (code: $code)');
     }
-    final code = body['code'];
-    if (code != 0 && code != null) {
-      throw Exception(body['msg'] ?? 'Request failed (code: $code)');
-    }
-    return body;
+    return data;
   }
 
   // ========== Auth ==========
 
-  Future<Map<String, dynamic>> login(String email, String password, {String? captcha}) async {
+  Future<Map<String, dynamic>> login(String email, String password,
+      {String? captcha, String? ticket}) async {
+    final body = <String, dynamic>{
+      'email': email,
+      'password': password,
+      if (captcha != null && captcha.isNotEmpty) 'captcha': captcha,
+      if (ticket != null && ticket.isNotEmpty) 'ticket': ticket,
+    };
+
     final res = await http.post(
-      Uri.parse('$_base/api/v4/session/signin'),
+      Uri.parse('$_base/session/token'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'user_name': email,
-        'password': password,
-        if (captcha != null) 'captcha': captcha,
-      }),
+      body: jsonEncode(body),
     );
-    final data = await _handleResponse(res);
+    final data = _parseResponse(res);
     final tokenData = data['data']?['token'];
     if (tokenData != null) {
-      token = tokenData['access_token'];
+      accessToken = tokenData['access_token'];
       refreshToken = tokenData['refresh_token'];
     }
     return data;
@@ -61,15 +69,15 @@ class CloudreveApi {
     if (refreshToken == null || refreshToken!.isEmpty) return false;
     try {
       final res = await http.post(
-        Uri.parse('$_base/api/v4/session/token/refresh'),
+        Uri.parse('$_base/session/token/refresh'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'refresh_token': refreshToken}),
       );
-      final data = await _handleResponse(res);
+      final data = _parseResponse(res);
       final tokenData = data['data'];
       if (tokenData != null) {
-        token = tokenData['access_token'];
-        refreshToken = tokenData['refresh_token'];
+        accessToken = tokenData['access_token'] ?? accessToken;
+        refreshToken = tokenData['refresh_token'] ?? refreshToken;
         return true;
       }
     } catch (_) {}
@@ -78,12 +86,13 @@ class CloudreveApi {
 
   Future<void> logout() async {
     try {
-      await http.post(
-        Uri.parse('$_base/api/v4/session/signout'),
+      await http.delete(
+        Uri.parse('$_base/session/token'),
         headers: _headers,
+        body: jsonEncode({}),
       );
     } catch (_) {}
-    token = null;
+    accessToken = null;
     refreshToken = null;
   }
 
@@ -91,105 +100,174 @@ class CloudreveApi {
 
   Future<User> getUserInfo() async {
     final res = await http.get(
-      Uri.parse('$_base/api/v4/user/storage'),
+      Uri.parse('$_base/user/me'),
       headers: _headers,
     );
-    final data = await _handleResponse(res);
+    final data = _parseResponse(res);
     return User.fromJson(data['data'] ?? {});
+  }
+
+  Future<CapacityInfo> getCapacity() async {
+    final res = await http.get(
+      Uri.parse('$_base/user/capacity'),
+      headers: _headers,
+    );
+    final data = _parseResponse(res);
+    return CapacityInfo.fromJson(data['data'] ?? {});
+  }
+
+  // ========== Site ==========
+
+  Future<Map<String, dynamic>> getBasicConfig() async {
+    final res = await http.get(
+      Uri.parse('$_base/site/config/basic'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    final data = _parseResponse(res);
+    return data['data'] is Map
+        ? Map<String, dynamic>.from(data['data'])
+        : <String, dynamic>{};
+  }
+
+  Future<Map<String, String>> getCaptcha() async {
+    final res = await http.get(
+      Uri.parse('$_base/site/captcha'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    final data = _parseResponse(res);
+    final d = data['data'] is Map
+        ? Map<String, dynamic>.from(data['data'])
+        : data;
+    return {
+      'image': (d['image'] as String?) ?? '',
+      'ticket': (d['ticket'] as String?) ?? '',
+    };
   }
 
   // ========== File ==========
 
-  Future<List<FileItem>> listFiles(String path, {int page = 1, int pageSize = 50}) async {
-    final query = {
-      'path': path,
+  Future<FileListResponse> listFiles(String uri,
+      {int page = 1, int? pageSize, String? orderBy, String? orderDirection}) async {
+    final params = <String, String>{
+      'uri': uri,
       'page': page.toString(),
-      'page_size': pageSize.toString(),
+      if (pageSize != null) 'page_size': pageSize.toString(),
+      if (orderBy != null) 'order_by': orderBy,
+      if (orderDirection != null) 'order_direction': orderDirection,
     };
-    final uri = Uri.parse('$_base/api/v4/file/list').replace(queryParameters: query);
-    final res = await http.get(uri, headers: _headers);
-    final data = await _handleResponse(res);
-    final items = data['data']?['items'] ?? data['data']?['objects'] ?? [];
-    if (items is List) {
-      return items.map((e) => FileItem.fromJson(e as Map<String, dynamic>)).toList();
-    }
-    return [];
+    final url = Uri.parse('$_base/file').replace(queryParameters: params);
+    final res = await http.get(url, headers: _headers);
+    final data = _parseResponse(res);
+    return FileListResponse.fromJson(data['data'] ?? {});
   }
 
   Future<FileItem> getFileInfo(String uri) async {
     final res = await http.get(
-      Uri.parse('$_base/api/v4/file/info').replace(queryParameters: {'uri': uri}),
+      Uri.parse('$_base/file/$uri?uri=$uri'),
       headers: _headers,
     );
-    final data = await _handleResponse(res);
+    final data = _parseResponse(res);
     return FileItem.fromJson(data['data'] ?? {});
   }
 
-  Future<void> createFolder(String path, String name) async {
-    await http.post(
-      Uri.parse('$_base/api/v4/file/create'),
+  Future<void> createFolder(String uri, String name) async {
+    final newFolderUri = uri.endsWith('/') ? '$uri$name' : '$uri/$name';
+    final res = await http.post(
+      Uri.parse('$_base/file/create'),
       headers: _headers,
       body: jsonEncode({
-        'path': path,
-        'name': name,
+        'uri': newFolderUri,
         'type': 'dir',
       }),
     );
+    _parseResponse(res);
   }
 
   Future<void> rename(String uri, String newName) async {
-    await http.post(
-      Uri.parse('$_base/api/v4/file/rename'),
+    final res = await http.post(
+      Uri.parse('$_base/file/rename'),
       headers: _headers,
       body: jsonEncode({
         'uri': uri,
         'new_name': newName,
       }),
     );
+    _parseResponse(res);
   }
 
-  Future<void> delete(List<String> uris) async {
-    await http.post(
-      Uri.parse('$_base/api/v4/file/delete'),
+  Future<void> deleteFiles(List<String> uris) async {
+    final res = await http.delete(
+      Uri.parse('$_base/file'),
       headers: _headers,
       body: jsonEncode({'uris': uris}),
     );
+    _parseResponse(res);
   }
 
-  Future<void> move(String uri, String destination) async {
-    await http.post(
-      Uri.parse('$_base/api/v4/file/move'),
+  Future<void> moveFiles(List<String> uris, String dst) async {
+    final res = await http.post(
+      Uri.parse('$_base/file/move'),
       headers: _headers,
       body: jsonEncode({
-        'uri': uri,
-        'destination': destination,
+        'uris': uris,
+        'dst': dst,
+        'copy': false,
       }),
     );
+    _parseResponse(res);
   }
 
-  Future<void> copy(String uri, String destination) async {
-    await http.post(
-      Uri.parse('$_base/api/v4/file/copy'),
+  Future<void> copyFiles(List<String> uris, String dst) async {
+    final res = await http.post(
+      Uri.parse('$_base/file/move'),
       headers: _headers,
       body: jsonEncode({
-        'uri': uri,
-        'destination': destination,
+        'uris': uris,
+        'dst': dst,
+        'copy': true,
       }),
     );
+    _parseResponse(res);
   }
 
   Future<String> getDownloadUrl(String uri) async {
-    final res = await http.get(
-      Uri.parse('$_base/api/v4/file/download').replace(queryParameters: {'uri': uri}),
+    final res = await http.post(
+      Uri.parse('$_base/file/url'),
       headers: _headers,
+      body: jsonEncode({
+        'uris': [uri],
+        'download': true,
+      }),
     );
-    final data = await _handleResponse(res);
-    return data['data']?['url'] ?? '';
+    final data = _parseResponse(res);
+    final items = data['data'];
+    if (items is List && items.isNotEmpty) {
+      return items[0]['url'] ?? '';
+    }
+    return '';
   }
 
-  Future<String> createUploadSession(String path, String name, int size) async {
+  Future<List<Map<String, dynamic>>> getDownloadUrls(List<String> uris) async {
     final res = await http.post(
-      Uri.parse('$_base/api/v4/file/upload'),
+      Uri.parse('$_base/file/url'),
+      headers: _headers,
+      body: jsonEncode({
+        'uris': uris,
+        'download': true,
+      }),
+    );
+    final data = _parseResponse(res);
+    final items = data['data'];
+    if (items is List) {
+      return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>> createUploadSession(
+      String path, String name, int size) async {
+    final res = await http.post(
+      Uri.parse('$_base/file/upload'),
       headers: _headers,
       body: jsonEncode({
         'path': path,
@@ -197,7 +275,57 @@ class CloudreveApi {
         'size': size,
       }),
     );
-    final data = await _handleResponse(res);
-    return data['data']?['session_id'] ?? '';
+    final data = _parseResponse(res);
+    return Map<String, dynamic>.from(data['data'] ?? {});
+  }
+}
+
+class FileListResponse {
+  final List<FileItem> items;
+  final String? nextPageToken;
+  final int? total;
+
+  FileListResponse({
+    required this.items,
+    this.nextPageToken,
+    this.total,
+  });
+
+  factory FileListResponse.fromJson(Map<String, dynamic> json) {
+    final objects = json['objects'] ?? json['items'] ?? [];
+    return FileListResponse(
+      items: (objects is List)
+          ? objects.map((e) => FileItem.fromJson(e as Map<String, dynamic>)).toList()
+          : <FileItem>[],
+      nextPageToken: json['next_page_token'],
+      total: json['total'],
+    );
+  }
+}
+
+class CapacityInfo {
+  final int used;
+  final int total;
+
+  CapacityInfo({required this.used, required this.total});
+
+  factory CapacityInfo.fromJson(Map<String, dynamic> json) {
+    return CapacityInfo(
+      used: (json['used'] as num?)?.toInt() ?? 0,
+      total: (json['total'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  double get percent => total <= 0 ? 0 : (used / total).clamp(0.0, 1.0);
+
+  String get displayUsed => '${_formatSize(used)} / ${_formatSize(total)}';
+
+  static String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 }

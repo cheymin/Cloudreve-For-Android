@@ -56,18 +56,6 @@ jobs:
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release/Cloudreve-${VERSION}-arm64-v8a.apk"
           cp build/app/outputs/flutter-apk/app-x86_64-release.apk "release/Cloudreve-${VERSION}-x86_64.apk"
 
-      - name: Create or update tag for release
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          TAG="latest"
-          # Delete remote tag if exists
-          git push origin :refs/tags/${TAG} 2>/dev/null || true
-          # Create local tag
-          git tag -f ${TAG}
-          # Push tag
-          git push origin ${TAG}
-
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
@@ -76,6 +64,7 @@ jobs:
           body: |
             Automated build from `${{ github.sha }}` on ${{ steps.version.outputs.version }}
           files: release/*.apk
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/file_item.dart';
@@ -20,12 +18,12 @@ class FileManagerScreen extends StatefulWidget {
 }
 
 class _FileManagerScreenState extends State<FileManagerScreen> {
-  String _currentPath = '/';
+  String _currentUri = '/';
   List<FileItem> _files = [];
   bool _loading = false;
   User? _user;
-  final List<String> _pathStack = ['/'];
-  FileItem? _selectedItem;
+  CapacityInfo? _capacity;
+  final List<String> _uriStack = ['/'];
   bool _selectionMode = false;
   final Set<String> _selectedUris = {};
 
@@ -38,12 +36,14 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
-      final files = await widget.api.listFiles(_currentPath);
+      final files = await widget.api.listFiles(_currentUri);
       final user = await widget.api.getUserInfo();
+      final capacity = await widget.api.getCapacity();
       if (mounted) {
         setState(() {
-          _files = files;
+          _files = files.items;
           _user = user;
+          _capacity = capacity;
           _loading = false;
         });
       }
@@ -58,10 +58,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   void _enterFolder(FileItem folder) {
-    _pathStack.add(folder.uri);
+    _uriStack.add(folder.uri);
     setState(() {
-      _currentPath = folder.uri;
-      _selectedItem = null;
+      _currentUri = folder.uri;
       _selectionMode = false;
       _selectedUris.clear();
     });
@@ -69,11 +68,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   void _goBack() {
-    if (_pathStack.length > 1) {
-      _pathStack.removeLast();
+    if (_uriStack.length > 1) {
+      _uriStack.removeLast();
       setState(() {
-        _currentPath = _pathStack.last;
-        _selectedItem = null;
+        _currentUri = _uriStack.last;
         _selectionMode = false;
         _selectedUris.clear();
       });
@@ -81,13 +79,12 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     }
   }
 
-  void _navigateToPath(int index) {
-    while (_pathStack.length > index + 1) {
-      _pathStack.removeLast();
+  void _navigateToUri(int index) {
+    while (_uriStack.length > index + 1) {
+      _uriStack.removeLast();
     }
     setState(() {
-      _currentPath = _pathStack.last;
-      _selectedItem = null;
+      _currentUri = _uriStack.last;
       _selectionMode = false;
       _selectedUris.clear();
     });
@@ -118,7 +115,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
 
     if (name != null && name.isNotEmpty) {
       try {
-        await widget.api.createFolder(_currentPath, name);
+        await widget.api.createFolder(_currentUri, name);
         _loadData();
       } catch (e) {
         if (mounted) {
@@ -184,7 +181,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
 
     if (ok == true) {
       try {
-        await widget.api.delete(uris);
+        await widget.api.deleteFiles(uris);
         setState(() {
           _selectionMode = false;
           _selectedUris.clear();
@@ -256,7 +253,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Future<void> _logout() async {
-    await widget.api.logout();
+    try {
+      await widget.api.logout();
+    } catch (_) {}
     await StorageService.clearAuth();
     if (mounted) {
       Navigator.pushReplacement(
@@ -267,30 +266,39 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   IconData _fileIcon(FileItem item) {
-    if (item.isDir) return Icons.folder;
+    if (item.isFolder) return Icons.folder;
     if (item.isImage) return Icons.image;
     if (item.isVideo) return Icons.video_file;
     if (item.isAudio) return Icons.audio_file;
+    if (item.isDocument) return Icons.description;
     return Icons.insert_drive_file;
   }
 
   Color _fileColor(FileItem item, ColorScheme scheme) {
-    if (item.isDir) return const Color(0xFFFFB300);
+    if (item.isFolder) return const Color(0xFFFFB300);
     if (item.isImage) return const Color(0xFF4CAF50);
     if (item.isVideo) return const Color(0xFFF44336);
     if (item.isAudio) return const Color(0xFF9C27B0);
+    if (item.isDocument) return const Color(0xFF2196F3);
     return scheme.primary;
+  }
+
+  String _getBreadcrumbName(String uri, int index) {
+    if (uri == '/' || uri.isEmpty) return '首页';
+    final parts = uri.split('/').where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return '首页';
+    if (index >= parts.length) return parts.last;
+    return parts[index];
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final isApple = theme.appBarTheme.titleTextStyle?.fontSize == 34;
 
     return Scaffold(
       appBar: AppBar(
-        leading: _currentPath != '/'
+        leading: _currentUri != '/' && _uriStack.length > 1
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: _goBack,
@@ -301,13 +309,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (isApple)
-                    Text('Cloudreve', style: theme.textTheme.titleMedium)
-                  else
-                    Text('Cloudreve', style: theme.textTheme.titleLarge),
-                  if (_user != null)
+                  Text(
+                    _user?.displayName ?? 'Cloudreve',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (_capacity != null)
                     Text(
-                      _user!.usageText,
+                      _capacity!.displayUsed,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -318,7 +328,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           if (_selectionMode) ...[
             IconButton(
               icon: const Icon(Icons.delete),
-              onPressed: _selectedUris.isEmpty ? null : () => _deleteItems(_selectedUris.toList()),
+              onPressed: _selectedUris.isEmpty
+                  ? null
+                  : () => _deleteItems(_selectedUris.toList()),
             ),
             IconButton(
               icon: const Icon(Icons.close),
@@ -350,13 +362,14 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: _pathStack.length,
-              separatorBuilder: (_, __) => const Icon(Icons.chevron_right, size: 18),
+              itemCount: _uriStack.length,
+              separatorBuilder: (_, __) =>
+                  const Icon(Icons.chevron_right, size: 18),
               itemBuilder: (ctx, i) {
-                final name = _pathStack[i] == '/' ? '首页' : _pathStack[i].split('/').last;
-                final isLast = i == _pathStack.length - 1;
+                final isLast = i == _uriStack.length - 1;
+                final name = _getBreadcrumbName(_uriStack[i], i);
                 return TextButton(
-                  onPressed: isLast ? null : () => _navigateToPath(i),
+                  onPressed: isLast ? null : () => _navigateToUri(i),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     minimumSize: Size.zero,
@@ -365,7 +378,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   child: Text(
                     name,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: isLast ? colorScheme.onSurface : colorScheme.primary,
+                      color: isLast
+                          ? colorScheme.onSurface
+                          : colorScheme.primary,
                       fontWeight: isLast ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
@@ -374,6 +389,16 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             ),
           ),
           const Divider(height: 1),
+          // Storage bar
+          if (_capacity != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: LinearProgressIndicator(
+                value: _capacity!.percent,
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           // File list
           Expanded(
             child: _loading
@@ -409,11 +434,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                               _fileIcon(item),
                               color: _fileColor(item, colorScheme),
                             ),
-                            title: Text(item.name),
-                            subtitle: item.isDir
+                            title: Text(
+                              item.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: item.isFolder
                                 ? null
                                 : Text(
-                                    '${item.displaySize} · ${DateFormat.yMd().add_Hm().format(item.updatedAt ?? item.createdAt ?? DateTime.now())}',
+                                    '${item.displaySize} · ${item.displayDate}',
                                     style: theme.textTheme.bodySmall,
                                   ),
                             trailing: _selectionMode
@@ -439,7 +468,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                                     _selectedUris.add(item.uri);
                                   }
                                 });
-                              } else if (item.isDir) {
+                              } else if (item.isFolder) {
                                 _enterFolder(item);
                               } else {
                                 _showItemMenu(item);
