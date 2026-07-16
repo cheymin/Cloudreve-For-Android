@@ -1,5 +1,7 @@
 name: Build and Release APK
 
+permissions: write-all
+
 on:
   push:
     branches:
