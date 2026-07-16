@@ -77,7 +77,7 @@ class _SyncScreenState extends State<SyncScreen> {
           Icon(
             Icons.sync_alt_outlined,
             size: 80,
-            color: theme.colorScheme.primary.withValues(alpha: 0.5),
+            color: theme.colorScheme.primary.withOpacity(0.5),
           ),
           const SizedBox(height: 16),
           Text(
@@ -88,7 +88,7 @@ class _SyncScreenState extends State<SyncScreen> {
           Text(
             '点击右下角按钮添加同步任务',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              color: theme.colorScheme.onSurface.withOpacity(0.6),
             ),
           ),
         ],
@@ -129,7 +129,7 @@ class _SyncScreenState extends State<SyncScreen> {
                       Text(
                         config.syncMode.displayName,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                     ],
@@ -154,7 +154,7 @@ class _SyncScreenState extends State<SyncScreen> {
                       Text(
                         '本地路径',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -179,7 +179,7 @@ class _SyncScreenState extends State<SyncScreen> {
                       Text(
                         '远程路径',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -207,7 +207,7 @@ class _SyncScreenState extends State<SyncScreen> {
               Text(
                 '${config.syncedFiles} / ${config.totalFiles} 个文件',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  color: theme.colorScheme.onSurface.withOpacity(0.6),
                 ),
               ),
             ],
@@ -232,7 +232,7 @@ class _SyncScreenState extends State<SyncScreen> {
                     Text(
                       '上次同步: ${DateFormat('MM-dd HH:mm').format(config.lastSyncTime!)}',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        color: theme.colorScheme.onSurface.withOpacity(0.6),
                       ),
                     ),
                   ],
@@ -297,7 +297,7 @@ class _SyncScreenState extends State<SyncScreen> {
   Color _getStatusColor(SyncStatus status, ThemeData theme) {
     switch (status) {
       case SyncStatus.idle:
-        return theme.colorScheme.onSurface.withValues(alpha: 0.6);
+        return theme.colorScheme.onSurface.withOpacity(0.6);
       case SyncStatus.syncing:
         return theme.colorScheme.primary;
       case SyncStatus.success:
@@ -529,7 +529,7 @@ class _SyncScreenState extends State<SyncScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         decoration: BoxDecoration(
-          color: isSelected ? theme.colorScheme.primary.withValues(alpha: 0.1) : null,
+          color: isSelected ? theme.colorScheme.primary.withOpacity(0.1) : null,
           border: Border.all(
             color: isSelected ? theme.colorScheme.primary : theme.colorScheme.outline,
           ),

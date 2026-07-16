@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
@@ -231,12 +232,12 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  List<int> _decodeCaptchaImage(String dataUrl) {
+  Uint8List _decodeCaptchaImage(String dataUrl) {
     if (dataUrl.startsWith('data:image/')) {
       final base64 = dataUrl.split(',').last;
       return base64Decode(base64);
     }
-    return [];
+    return Uint8List(0);
   }
 
   @override
