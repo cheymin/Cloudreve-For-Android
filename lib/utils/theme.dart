@@ -35,7 +35,7 @@ class ThemeProvider extends ChangeNotifier {
       default:
         _themeMode = ThemeMode.system;
     }
-    _uiStyle = UiStyleX.fromString(StorageService.uiStyle);
+    _uiStyle = UiStyleX.fromString(StorageService.uiStyle ?? 'google');
     final colorVal = StorageService.customPrimaryColor;
     _customPrimaryColor = colorVal == null ? null : Color(colorVal);
     notifyListeners();
